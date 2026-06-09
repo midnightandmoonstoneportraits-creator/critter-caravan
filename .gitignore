@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build output
+out/
+build/
+*.rbxlx
+*.rbxm
+
+# Rojo
+.rojo/
+serve.json
+
+# IDE
+.vscode/settings.json
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local

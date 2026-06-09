@@ -1,0 +1,37 @@
+{
+  "name": "critter-caravan",
+  "globIgnorePaths": [
+    "**/package.json",
+    "**/tsconfig.json",
+    "**/.gitignore",
+    "**/.vscode/**",
+    "**/node_modules/**"
+  ],
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Knit": {
+        "$path": "src/shared"
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "Knit": {
+        "$path": "src/server"
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "Knit": {
+          "$path": "src/client"
+        }
+      }
+    },
+    "HttpService": {
+      "$className": "HttpService"
+    }
+  }
+}
