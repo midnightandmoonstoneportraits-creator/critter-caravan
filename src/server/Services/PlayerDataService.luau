@@ -345,6 +345,39 @@ function PlayerDataService:RecalculateStats(player: Player)
     profile.CaravanData.Stats = stats
 end
 
+--=============================================================================
+-- BREEDING SYSTEM
+--=============================================================================
+
+--[[
+    Sets or clears the active breeding process for a player.
+]]
+function PlayerDataService:SetBreedingProcess(player: Player, process: table?)
+    local profile = self:GetProfile(player)
+    if profile then
+        profile.BreedingProcess = process
+        self:MarkDirty(player)
+    end
+end
+
+--[[
+    Adds an entry to the player's breeding history.
+]]
+function PlayerDataService:AddBreedingHistory(player: Player, entry: table)
+    local profile = self:GetProfile(player)
+    if profile then
+        if not profile.BreedingHistory then
+            profile.BreedingHistory = {}
+        end
+        table.insert(profile.BreedingHistory, entry)
+        -- Keep only last 50 entries
+        if #profile.BreedingHistory > 50 then
+            table.remove(profile.BreedingHistory, 1)
+        end
+        self:MarkDirty(player)
+    end
+end
+
 -- Lifecycle events
 Players.PlayerAdded:Connect(function(player)
     PlayerDataService:LoadProfile(player)
