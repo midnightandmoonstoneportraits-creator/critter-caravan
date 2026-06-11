@@ -3,9 +3,7 @@
     Manages player persistence — collections, inventory, caravan state, and profile data.
     Uses the standard DataStore pattern with auto-save for all player-owned assets.
 ]]
-
 local Knit = require(script.Parent.Parent.Knit)
-
 local PlayerDataService = Knit.CreateService {
     Name = "PlayerDataService",
     Client = {
@@ -17,6 +15,7 @@ local PlayerDataService = Knit.CreateService {
 -- Dependencies
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 
 -- Configuration
 local DATASTORE_NAME = "CritterCaravan_PlayerData"
@@ -39,9 +38,14 @@ function PlayerDataService:CreateDefaultProfile()
     return {
         CollectedCreatures = {},
         Inventory = {
+            Resources = {},     -- { resourceId = count, ... }
             Decorations = {},   -- { decorationId = count, ... }
             Currency = 0,       -- Soft currency for shop purchases
             PremiumCurrency = 0, -- Hard currency (Robux-purchased)
+        },
+        DiscoveryLog = {
+            Biomes = {},        -- { biomeId = true, ... }
+            Recipes = {},       -- { recipeId = true, ... }
         },
         CaravanData = {
             CurrentChassis = "StarterWagon",
@@ -51,6 +55,7 @@ function PlayerDataService:CreateDefaultProfile()
             Decorations = {},      -- { slot = decorationId, ... }
             OwnedDecorations = {}, -- { decorationId = true, ... }
             Upgrades = {},         -- { upgradeId = true, ... }
+            Vivarium = {},         -- { creatureId = { Type, Affinity, LastUpdate }, ... }
             Stats = {              -- Computed stats (base + upgrades)
                 Speed = 10,
                 Capacity = 5,
@@ -68,7 +73,6 @@ end
 function PlayerDataService:LoadProfile(player: Player)
     local userId = player.UserId
     local success, data = false, nil
-
     if dataStore then
         success, data = pcall(function()
             return dataStore:GetAsync(tostring(userId))
@@ -98,72 +102,74 @@ function PlayerDataService:SaveProfile(player: Player)
         end)
         if not success then
             warn(("[PlayerDataService] Failed to save profile for %s: %s"):format(player.Name, tostring(err)))
+        else
+            saveQueue[player] = nil
         end
     end
-    saveQueue[player] = nil
 end
 
 --[[
-    Auto-save loop: saves all dirty profiles every AUTOSAVE_INTERVAL seconds.
+    Marks a player's profile as "dirty" (needs saving).
+]]
+function PlayerDataService:MarkDirty(player: Player)
+    saveQueue[player] = true
+end
+
+--[[
+    Periodically saves dirty profiles.
 ]]
 function PlayerDataService:StartAutosave()
     while true do
         task.wait(AUTOSAVE_INTERVAL)
-        for player, _ in pairs(saveQueue) do
-            self:SaveProfile(player)
+        for player in pairs(saveQueue) do
+            if player:IsDescendantOf(game) then
+                self:SaveProfile(player)
+            else
+                saveQueue[player] = nil
+            end
         end
     end
 end
 
 --[[
-    Marks a profile as needing save.
-]]
-function PlayerDataService:MarkDirty(player: Player)
-    if profiles[player] then
-        saveQueue[player] = true
-    end
-end
-
---[[
-    Returns a player's profile. Used by other services (CaravanService, CreatureService).
+    Returns the player's profile data.
 ]]
 function PlayerDataService:GetProfile(player: Player)
     return profiles[player]
 end
 
 --[[
-    Returns a player's currency balance.
+    Returns the player's current soft currency.
 ]]
 function PlayerDataService:GetCurrency(player: Player)
     local profile = self:GetProfile(player)
-    if profile then
-        return profile.Inventory.Currency
-    end
-    return 0
+    return profile and profile.Inventory.Currency or 0
 end
 
 --[[
-    Adds currency to a player's balance.
-    @return number — New balance
+    Adjusts the player's soft currency.
 ]]
-function PlayerDataService:AddCurrency(player: Player, amount: number): number
+function PlayerDataService:AdjustCurrency(player: Player, amount: number)
     local profile = self:GetProfile(player)
     if profile then
         profile.Inventory.Currency = math.max(0, profile.Inventory.Currency + amount)
         self:MarkDirty(player)
-        return profile.Inventory.Currency
+        return true
     end
-    return 0
+    return false
 end
 
+--=============================================================================
+-- CARAVAN & UPGRADES
+--=============================================================================
+
 --[[
-    Spends currency from a player's balance.
-    @return boolean — Whether the purchase was successful
+    Applies a decoration to a specific slot on the caravan.
 ]]
-function PlayerDataService:SpendCurrency(player: Player, amount: number): boolean
+function PlayerDataService:ApplyDecoration(player: Player, slot: string, decorationId: string)
     local profile = self:GetProfile(player)
-    if profile and profile.Inventory.Currency >= amount then
-        profile.Inventory.Currency -= amount
+    if profile then
+        profile.CaravanData.Decorations[slot] = decorationId
         self:MarkDirty(player)
         return true
     end
@@ -171,15 +177,16 @@ function PlayerDataService:SpendCurrency(player: Player, amount: number): boolea
 end
 
 --[[
-    Adds a decoration to the player's inventory.
+    Removes a decoration from a specific slot.
 ]]
-function PlayerDataService:GiveDecoration(player: Player, decorationId: string)
+function PlayerDataService:RemoveDecoration(player: Player, slot: string)
     local profile = self:GetProfile(player)
     if profile then
-        profile.Inventory.Decorations[decorationId] = (profile.Inventory.Decorations[decorationId] or 0) + 1
-        profile.CaravanData.OwnedDecorations[decorationId] = true
+        profile.CaravanData.Decorations[slot] = nil
         self:MarkDirty(player)
+        return true
     end
+    return false
 end
 
 --[[
@@ -188,66 +195,18 @@ end
 function PlayerDataService:HasDecoration(player: Player, decorationId: string): boolean
     local profile = self:GetProfile(player)
     if profile then
-        return profile.Inventory.Decorations[decorationId] ~= nil and profile.Inventory.Decorations[decorationId] > 0
+        return profile.CaravanData.OwnedDecorations[decorationId] == true
     end
     return false
 end
 
 --[[
-    Removes one instance of a decoration from a player's inventory.
+    Adds a decoration to the player's collection.
 ]]
-function PlayerDataService:ConsumeDecoration(player: Player, decorationId: string): boolean
-    local profile = self:GetProfile(player)
-    if profile and profile.Inventory.Decorations[decorationId] and profile.Inventory.Decorations[decorationId] > 0 then
-        profile.Inventory.Decorations[decorationId] -= 1
-        if profile.Inventory.Decorations[decorationId] <= 0 then
-            profile.Inventory.Decorations[decorationId] = nil
-            profile.CaravanData.OwnedDecorations[decorationId] = nil
-        end
-        self:MarkDirty(player)
-        return true
-    end
-    return false
-end
-
---=============================================================================
--- DISCOVERY TRACKING
---=============================================================================
-
---[[
-    Records a creature discovery for a player.
-    Creates a new record or updates the count if already discovered.
-]]
-function PlayerDataService:AddDiscovery(player: Player, creatureType: string)
+function PlayerDataService:AddDecoration(player: Player, decorationId: string)
     local profile = self:GetProfile(player)
     if profile then
-        if not profile.CollectedCreatures[creatureType] then
-            profile.CollectedCreatures[creatureType] = {
-                FirstDiscovered = os.time(),
-                TotalFound = 0,
-                MutationsFound = {},
-            }
-        end
-
-        local record = profile.CollectedCreatures[creatureType]
-        record.TotalFound += 1
-        self:MarkDirty(player)
-
-        print(("[PlayerDataService] %s discovered %s (total: %d)"):format(player.Name, creatureType, record.TotalFound))
-    end
-end
-
---[[
-    Records a specific mutation found on a creature during discovery.
-]]
-function PlayerDataService:AddMutationDiscovery(player: Player, creatureType: string, mutation: string)
-    local profile = self:GetProfile(player)
-    if profile and profile.CollectedCreatures[creatureType] then
-        local record = profile.CollectedCreatures[creatureType]
-        if not record.MutationsFound[mutation] then
-            record.MutationsFound[mutation] = true
-            print(("[PlayerDataService] %s found mutation %s on %s"):format(player.Name, mutation, creatureType))
-        end
+        profile.CaravanData.OwnedDecorations[decorationId] = true
         self:MarkDirty(player)
     end
 end
@@ -319,7 +278,7 @@ function PlayerDataService:RecalculateStats(player: Player)
     if not profile then return end
 
     local CaravanData = require(script.Parent.Parent.Parent.shared.Data.CaravanData)
-
+    
     -- Start with chassis base stats
     local chassisId = profile.CaravanData.CurrentChassis
     local chassisDef = CaravanData.Chassis[chassisId]
@@ -343,6 +302,116 @@ function PlayerDataService:RecalculateStats(player: Player)
     end
 
     profile.CaravanData.Stats = stats
+end
+
+--=============================================================================
+-- DISCOVERY TRACKING
+--=============================================================================
+
+--[[
+    Records a creature discovery for a player.
+    Creates a new record or updates the count if already discovered.
+]]
+function PlayerDataService:AddDiscovery(player: Player, creatureType: string)
+    local profile = self:GetProfile(player)
+    if profile then
+        if not profile.CollectedCreatures[creatureType] then
+            profile.CollectedCreatures[creatureType] = {
+                FirstDiscovered = os.time(),
+                TotalFound = 0,
+                MutationsFound = {},
+            }
+        end
+        local record = profile.CollectedCreatures[creatureType]
+        record.TotalFound += 1
+        self:MarkDirty(player)
+        print(("[PlayerDataService] %s discovered %s (total: %d)"):format(player.Name, creatureType, record.TotalFound))
+    end
+end
+
+--[[
+    Records a specific mutation found on a creature during discovery.
+]]
+function PlayerDataService:AddMutationDiscovery(player: Player, creatureType: string, mutation: string)
+    local profile = self:GetProfile(player)
+    if profile and profile.CollectedCreatures[creatureType] then
+        local record = profile.CollectedCreatures[creatureType]
+        if not record.MutationsFound[mutation] then
+            record.MutationsFound[mutation] = true
+            print(("[PlayerDataService] %s found mutation %s on %s"):format(player.Name, mutation, creatureType))
+        end
+        self:MarkDirty(player)
+    end
+end
+
+--[[
+    Adds a resource item to the player's inventory.
+]]
+function PlayerDataService:AddInventoryItem(player: Player, itemName: string, amount: number)
+    local profile = self:GetProfile(player)
+    if profile then
+        if not profile.Inventory.Resources then
+            profile.Inventory.Resources = {}
+        end
+        profile.Inventory.Resources[itemName] = (profile.Inventory.Resources[itemName] or 0) + amount
+        self:MarkDirty(player)
+        print(("[PlayerDataService] Added %d %s to %s's inventory"):format(amount, itemName, player.Name))
+    end
+end
+
+--[[
+    Records a discovery in the field journal (Biomes, Recipes, etc.).
+]]
+function PlayerDataService:AddDiscoveryLog(player: Player, category: string, id: string)
+    local profile = self:GetProfile(player)
+    if profile and profile.DiscoveryLog[category] then
+        if not profile.DiscoveryLog[category][id] then
+            profile.DiscoveryLog[category][id] = true
+            self:MarkDirty(player)
+            print(("[PlayerDataService] %s discovered %s: %s"):format(player.Name, category, id))
+            return true
+        end
+    end
+    return false
+end
+
+--=============================================================================
+-- VIVARIUM & AFFINITY
+--=============================================================================
+
+--[[
+    Adds a creature to the player's Vivarium.
+]]
+function PlayerDataService:AddCreatureToVivarium(player: Player, creatureType: string)
+    local profile = self:GetProfile(player)
+    if profile then
+        local creatureId = HttpService:GenerateGUID(false)
+        profile.CaravanData.Vivarium[creatureId] = {
+            Type = creatureType,
+            Affinity = 0,
+            LastUpdate = os.time(),
+        }
+        self:MarkDirty(player)
+        print(("[PlayerDataService] Added %s to %s's Vivarium (ID: %s)"):format(creatureType, player.Name, creatureId))
+        return creatureId
+    end
+    return nil
+end
+
+--[[
+    Updates a creature's affinity in the Vivarium.
+]]
+function PlayerDataService:UpdateCreatureAffinity(player: Player, creatureId: string, amount: number)
+    local profile = self:GetProfile(player)
+    if profile and profile.CaravanData.Vivarium[creatureId] then
+        local creature = profile.CaravanData.Vivarium[creatureId]
+        creature.Affinity = math.max(0, creature.Affinity + amount)
+        creature.LastUpdate = os.time()
+        self:MarkDirty(player)
+        print(("[PlayerDataService] Updated affinity for %s on %s: %d"):format(creatureId, player.Name, creature.Affinity))
+        return true
+    end
+    return false
 end
 
 -- Lifecycle events
