@@ -39,6 +39,109 @@ function CreatureService:KnitStart()
             task.wait(10)
         end
     end)
+
+    -- Start AI loop
+    task.spawn(function()
+        while true do
+            self:UpdateCreatureAI()
+            task.wait(1)
+        end
+    end)
+end
+
+--=============================================================================
+-- AI BEHAVIORS
+--=============================================================================
+
+function CreatureService:UpdateCreatureAI()
+    for _, creature in ipairs(CollectionService:GetTagged("Creature")) do
+        local creatureType = creature:GetAttribute("CreatureType")
+        if creatureType == "GlowpuffBog" then
+            self:HandleGlowpuffBogAI(creature)
+        elseif creatureType == "Sporedancer" then
+            self:HandleSporedancerAI(creature)
+        end
+    end
+end
+
+function CreatureService:HandleGlowpuffBogAI(creature)
+    -- Find nearest player
+    local nearestPlayer, minDistance = nil, 30
+    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+        local char = player.Character
+        if char and char.PrimaryPart then
+            local dist = (char.PrimaryPart.Position - creature.Position).Magnitude
+            if dist < minDistance then
+                minDistance = dist
+                nearestPlayer = player
+            end
+        end
+    end
+
+    if nearestPlayer then
+        -- Lead toward nearest resource node or POI
+        local nearestTarget, nodeDist = nil, 100
+        
+        -- Check Resources
+        for _, node in ipairs(CollectionService:GetTagged("ResourceNode")) do
+            if not node:GetAttribute("Depleted") then
+                local dist = (node.Position - creature.Position).Magnitude
+                if dist < nodeDist then
+                    nodeDist = dist
+                    nearestTarget = node
+                end
+            end
+        end
+
+        -- Check POIs
+        for _, poi in ipairs(CollectionService:GetTagged("POI")) do
+            local dist = (poi.Position - creature.Position).Magnitude
+            if dist < nodeDist then
+                nodeDist = dist
+                nearestTarget = poi
+            end
+        end
+
+        if nearestTarget then
+            -- Move toward target
+            local targetPos = nearestTarget.Position + Vector3.new(0, 5, 0) -- Hover above
+            self:MoveTo(creature, targetPos)
+        end
+    end
+end
+
+function CreatureService:HandleSporedancerAI(creature)
+    -- Shy behavior: retreat if player is too close and moving fast
+    local nearestPlayer, minDistance = nil, 15
+    for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
+        local char = player.Character
+        if char and char.PrimaryPart then
+            local dist = (char.PrimaryPart.Position - creature.Position).Magnitude
+            if dist < minDistance then
+                -- Check if player is moving fast (approaching quickly)
+                if char.PrimaryPart.AssemblyLinearVelocity.Magnitude > 10 then
+                    nearestPlayer = player
+                    minDistance = dist
+                end
+            end
+        end
+    end
+
+    if nearestPlayer then
+        -- Retreat from player
+        local direction = (creature.Position - nearestPlayer.Character.PrimaryPart.Position).Unit
+        local targetPos = creature.Position + direction * 10
+        self:MoveTo(creature, targetPos)
+    end
+end
+
+function CreatureService:MoveTo(creature, targetPos)
+    -- Simple movement implementation using TweenService or direct CFrame
+    -- For unanchored parts, we should ideally use forces, but for a prototype, Tweening works
+    local TweenService = game:GetService("TweenService")
+    local info = TweenInfo.new(1, Enum.EasingStyle.Linear)
+    local tween = TweenService:Create(creature, info, { Position = targetPos })
+    tween:Play()
 end
 
 --=============================================================================
@@ -163,9 +266,22 @@ function CreatureService:Befriend(player: Player, creatureInstance: Instance)
         return { success = false, error = "Unknown creature type" }
     end
 
-    -- Check player inventory for offering (simplified: always succeeds for now)
-    -- TODO: Integrate with inventory system for offering check
+    -- Check player inventory for offering
     local PlayerDataService = Knit.GetService("PlayerDataService")
+    local profile = PlayerDataService:GetProfile(player)
+    if not profile then return { success = false, error = "Profile not loaded" } end
+
+    local offering = creatureDef.BefriendOffering
+    local amount = creatureDef.OfferingAmount or 1
+
+    if offering then
+        local currentAmount = profile.Inventory.Resources[offering] or 0
+        if currentAmount < amount then
+            return { success = false, error = ("Missing offering: %d %s required"):format(amount, offering) }
+        end
+        -- Consume offering
+        PlayerDataService:AddInventoryItem(player, offering, -amount)
+    end
 
     -- Record the discovery
     PlayerDataService:AddDiscovery(player, creatureType)
@@ -178,6 +294,11 @@ function CreatureService:Befriend(player: Player, creatureInstance: Instance)
         if creatureInstance:GetAttribute("Mutation_" .. mutationKey) then
             PlayerDataService:AddMutationDiscovery(player, creatureType, mutationKey)
         end
+    end
+
+    -- Special handling for Elder Glowpuff (maybe grant a reward or discovery log)
+    if creatureType == "ElderGlowpuff" then
+        PlayerDataService:AddDiscoveryLog(player, "Biomes", "ElderGlowpuffMet") -- Placeholder for unique log
     end
 
     -- Destroy creature after befriending
