@@ -5,6 +5,7 @@
 ]]
 
 return {
+	-- Sunny Meadows creatures
 	["Glowpuff"] = {
 		DisplayName = "Glowpuff",
 		Description = "A fluffy, floating creature that emits a soft golden glow.",
@@ -31,6 +32,53 @@ return {
 		OfferingAmount = 5,
 		ModelAssetId = "rbxassetid://PLACEHOLDER_SHELLBACK",
 	},
+	-- Bioluminescent Bog creatures
+	["Sporedancer"] = {
+		DisplayName = "Sporedancer",
+		Description = "A mystical creature that dances through the bog, releasing glowing spores.",
+		BaseStats = { Speed = 4, Rarity = 2, Appeal = 6 },
+		RarityTier = "Uncommon",
+		PossibleMutations = { "Giant", "Neon", "Prismatic", "Luminous" },
+		Biomes = { "BioluminescentBog" },
+		Traits = { "Flying", "Nocturnal", "Bioluminescent", "Gentle" },
+		SpawnWeight = 100,
+		BefriendOffering = "Glowbulb",
+		OfferingAmount = 4,
+		AltBefriendOffering = "Bog Amber",
+		AltOfferingAmount = 2,
+		TamingMinigame = "DanceMatch", -- Player must match rhythm (3-5 beats)
+		ModelAssetId = "rbxassetid://PLACEHOLDER_SPOREDANCER",
+	},
+	["Glowpuff_Bog"] = {
+		DisplayName = "Bog Glowpuff",
+		Description = "A Bog variant of the Glowpuff with a deeper blue-teal glow and trailing light tail.",
+		BaseStats = { Speed = 5, Rarity = 2, Appeal = 4 },
+		RarityTier = "Uncommon",
+		PossibleMutations = { "Giant", "Luminous", "Prismatic" },
+		Biomes = { "BioluminescentBog" },
+		Traits = { "Flying", "Bioluminescent", "Curious" },
+		SpawnWeight = 70,
+		BefriendOffering = "Wild Berries",
+		OfferingAmount = 3,
+		AltBefriendOffering = "Mist Vial",
+		AltOfferingAmount = 1, -- Instant friendship
+		ModelAssetId = "rbxassetid://PLACEHOLDER_BOGGLOWPUFF",
+	},
+	["PrismSporedancer"] = {
+		DisplayName = "Prism Sporedancer",
+		Description = "An exceedingly rare Mythic Sporedancer with a multicolored prismatic glow.",
+		BaseStats = { Speed = 6, Rarity = 5, Appeal = 10 },
+		RarityTier = "Mythic",
+		PossibleMutations = { "Giant", "Prismatic", "Luminous" },
+		Biomes = { "BioluminescentBog" },
+		Traits = { "Flying", "Nocturnal", "Bioluminescent", "Rare" },
+		SpawnWeight = 5,
+		SpawnCondition = "HeartCrystalPulse", -- Only spawns when Heart Crystal pulses (every 10 min)
+		BefriendOffering = "Prism Shard",
+		OfferingAmount = 1,
+		ModelAssetId = "rbxassetid://PLACEHOLDER_PRISMSPOREDANCER",
+	},
+	-- Existing creatures from other biomes
 	["GlowSnail"] = {
 		DisplayName = "Glow Snail",
 		Description = "A slow-moving mollusk with a bioluminescent shell.",
