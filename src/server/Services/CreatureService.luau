@@ -273,14 +273,30 @@ function CreatureService:Befriend(player: Player, creatureInstance: Instance)
 
     local offering = creatureDef.BefriendOffering
     local amount = creatureDef.OfferingAmount or 1
+    local altOffering = creatureDef.AltOffering
+    local altAmount = creatureDef.AltOfferingAmount
 
-    if offering then
-        local currentAmount = profile.Inventory.Resources[offering] or 0
-        if currentAmount < amount then
-            return { success = false, error = ("Missing offering: %d %s required"):format(amount, offering) }
+    local usedOffering, usedAmount = nil, 0
+
+    if offering and profile.Inventory.Resources[offering] and profile.Inventory.Resources[offering] >= amount then
+        usedOffering = offering
+        usedAmount = amount
+    elseif altOffering and profile.Inventory.Resources[altOffering] and profile.Inventory.Resources[altOffering] >= altAmount then
+        usedOffering = altOffering
+        usedAmount = altAmount
+    end
+
+    if offering and not usedOffering then
+        local errorMsg = ("Missing offering: %d %s required"):format(amount, offering)
+        if altOffering then
+            errorMsg ..= (" or %d %s"):format(altAmount, altOffering)
         end
+        return { success = false, error = errorMsg }
+    end
+
+    if usedOffering then
         -- Consume offering
-        PlayerDataService:AddInventoryItem(player, offering, -amount)
+        PlayerDataService:AddInventoryItem(player, usedOffering, -usedAmount)
     end
 
     -- Record the discovery
@@ -301,11 +317,45 @@ function CreatureService:Befriend(player: Player, creatureInstance: Instance)
         PlayerDataService:AddDiscoveryLog(player, "Biomes", "ElderGlowpuffMet") -- Placeholder for unique log
     end
 
-    -- Destroy creature after befriending
-    creatureInstance:Destroy()
+    -- Design: joins the caravan... leave a trail of sparkling spores for 10 seconds 
+    -- as they follow the player to the caravan.
+    if creatureType == "Sporedancer" then
+        self:StartFollowing(creatureInstance, player, 10)
+    else
+        -- Destroy creature after befriending for others
+        creatureInstance:Destroy()
+    end
 
     print(("[CreatureService] %s befriended %s"):format(player.Name, creatureType))
     return { success = true, creatureType = creatureType, displayName = creatureDef.DisplayName }
+end
+
+function CreatureService:StartFollowing(creature, player, duration)
+    -- Attach follow logic
+    -- In a real implementation, we'd use a BodyPosition or AlignPosition
+    -- For this prototype, we'll just tween to player periodically or use a follow script
+    
+    local startTime = os.time()
+    task.spawn(function()
+        -- Add sparkling spore trail (Visual attribute for client or particle emitter)
+        local particles = Instance.new("ParticleEmitter")
+        particles.Texture = "rbxassetid://241532452" -- Placeholder sparkle
+        particles.Size = NumberSequence.new(0.2)
+        particles.Rate = 50
+        particles.Parent = creature
+
+        while os.time() - startTime < duration and creature and creature.Parent do
+            local char = player.Character
+            if char and char.PrimaryPart then
+                local targetPos = char.PrimaryPart.Position + Vector3.new(0, 0, 5) -- Follow behind
+                self:MoveTo(creature, targetPos)
+            end
+            task.wait(0.5)
+        end
+        if creature then
+            creature:Destroy()
+        end
+    end)
 end
 
 --[[
